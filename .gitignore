@@ -1,0 +1,5 @@
+.DS_Store
+cf-worker.json
+seen_events.txt
+chat_history.jsonl
+*.log
