@@ -1,0 +1,36 @@
+diff --git a/packages/cloudflare/src/index.ts b/packages/cloudflare/src/index.ts
+index 7963a1c..0000000 100644
+--- a/packages/cloudflare/src/index.ts
++++ b/packages/cloudflare/src/index.ts
+@@ -200,7 +200,13 @@ export class WxBinding extends DurableObject<Env> {
+     const path = url.pathname;
+     try {
+       if (path === "/login" && req.method === "POST") return json(200, await this.startLogin());
+-      if (path === "/login" && req.method === "GET") return json(200, (await this.ctx.storage.get(K.login)) ?? { status: "idle" });
++      if (path === "/login" && req.method === "GET") {
++        const st = (await this.ctx.storage.get<LoginState>(K.login)) ?? { status: "idle" as const, updated_at: 0 };
++        if (st.status === "waiting" && Date.now() - (st.updated_at ?? 0) > 5000) {
++          this.pollAbort?.abort();
++          await this.ctx.storage.setAlarm(Date.now());
++        }
++        return json(200, st);
++      }
+       if (path === "/session" && req.method === "PUT") {
+         const b = (await req.json()) as { session?: Session; context_tokens?: Record<string, string>; cursor?: string };
+         if (!b.session?.bot_token || !b.session.base_url) throw new WxBotError("bad_request", "session.bot_token and session.base_url are required");
+@@ -224,6 +230,7 @@ export class WxBinding extends DurableObject<Env> {
+         if (c.delivery !== "webhook" && c.delivery !== "pull") throw new WxBotError("bad_request", 'delivery must be "webhook" or "pull"');
+         if (c.delivery === "webhook" && !c.webhook?.url) throw new WxBotError("bad_request", "webhook.url is required for webhook delivery");
+         await this.ctx.storage.put(K.config, c);
++        this.pollAbort?.abort();
+         await this.ctx.storage.setAlarm(Date.now());
+         return json(200, { ok: true });
+       }
+@@ -257,6 +264,7 @@ export class WxBinding extends DurableObject<Env> {
+     const qr = await new LoginApi().getQrCode();
+     const st: LoginState = { status: "waiting", qrcode: qr.qrcode, qrcode_url: qr.imageContent, attempt: 1, updated_at: Date.now() };
+     await this.ctx.storage.put(K.login, st);
++    this.pollAbort?.abort();
+     await this.ctx.storage.setAlarm(Date.now());
+     return { status: st.status, qrcode_url: st.qrcode_url, attempt: st.attempt };
+   }
